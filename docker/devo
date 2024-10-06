@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+
+if ! [ -x "$(command -v docker-compose)" ]; then
+    shopt -s expand_aliases
+    alias docker-compose='docker compose'
+fi
+
+UNAMEOUT="$(uname -s)"
+
+WHITE='\033[1;37m'
+NC='\033[0m'
+
+# Verify operating system is supported...
+case "${UNAMEOUT}" in
+    Linux*)             MACHINE=linux;;
+    Darwin*)            MACHINE=mac;;
+    *)                  MACHINE="UNKNOWN"
+esac
+
+if [ "$MACHINE" == "UNKNOWN" ]; then
+    echo "Unsupported operating system [$(uname -s)]. Laravel Devo supports macOS, Linux, and Windows (WSL2)." >&2
+
+    exit 1
+fi
+
+# Define environment variables...
+export WWWUSER=${WWWUSER:-$UID}
+export WWWGROUP=${WWWGROUP:-$(id -g)}
+
+# Function that outputs Devo is not running...
+function devo_is_not_running {
+    echo -e "${WHITE}Devo is not running.${NC}" >&2
+    echo "" >&2
+    echo -e "${WHITE}You may use the following commands:${NC} './devo up' or './devo up -d'" >&2
+
+    exit 1
+}
+
+if [ -z "$devo_SKIP_CHECKS" ]; then
+    # Ensure that Docker is running...
+    if ! docker info > /dev/null 2>&1; then
+        echo -e "${WHITE}Docker is not running.${NC}" >&2
+
+        exit 1
+    fi
+
+    # Determine if Devo is currently up...
+    PSRESULT="$(docker-compose ps -q)"
+    if docker-compose ps "backend" | grep 'Exit\|exited'; then
+        echo -e "${WHITE}Shutting down old processes...${NC}" >&2
+
+        docker-compose down > /dev/null 2>&1
+
+        EXEC="no"
+    elif [ -n "$PSRESULT" ]; then
+        EXEC="yes"
+    else
+        EXEC="no"
+    fi
+else
+    EXEC="yes"
+fi
+
+if [ $# -gt 0 ]; then
+    # Proxy PHP commands to the "php" binary on the application container...
+    if [ "$1" == "php" ]; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                -u "$(id -u):$(id -g)" \
+                "backend" \
+                php "$@"
+        else
+            devo_is_not_running
+        fi
+
+    # Proxy Composer commands to the "composer" binary on the application container...
+    elif [ "$1" == "composer" ]; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                -u "$(id -u):$(id -g)" \
+                "backend" \
+                composer "$@"
+        else
+            devo_is_not_running
+        fi
+
+    # Proxy Artisan commands to the "artisan" binary on the application container...
+    elif [ "$1" == "artisan" ] || [ "$1" == "art" ]; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                -u "$(id -u):$(id -g)" \
+                "backend" \
+                php artisan "$@"
+        else
+            devo_is_not_running
+        fi
+
+    # Proxy the "debug" command to the "php artisan" binary on the application container with xdebug enabled...
+    elif [ "$1" == "debug" ]; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                -u "$(id -u):$(id -g)" \
+                -e XDEBUG_SESSION=1 \
+                "backend" \
+                php artisan "$@"
+        else
+            devo_is_not_running
+        fi
+
+    # Proxy the "test" command to the "php artisan test" Artisan command...
+    elif [ "$1" == "test" ]; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                -u "$(id -u):$(id -g)" \
+                "backend" \
+                php artisan test "$@"
+        else
+            devo_is_not_running
+        fi
+
+    # Proxy the "phpunit" command to "php vendor/bin/phpunit"...
+    elif [ "$1" == "phpunit" ]; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                -u "$(id -u):$(id -g)" \
+                "backend" \
+                php vendor/bin/phpunit "$@"
+        else
+            devo_is_not_running
+        fi
+
+    # Proxy the "pint" command to "php vendor/bin/pint"...
+    elif [ "$1" == "pint" ]; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                -u "$(id -u):$(id -g)" \
+                "backend" \
+                php vendor/bin/pint "$@"
+        else
+            devo_is_not_running
+        fi
+
+    # Proxy the "dusk" command to the "php artisan dusk" Artisan command...
+    elif [ "$1" == "dusk" ]; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                -u "$(id -u):$(id -g)" \
+                -e "APP_URL=http://backend" \
+                -e "DUSK_DRIVER_URL=http://selenium:4444/wd/hub" \
+                "backend" \
+                php artisan dusk "$@"
+        else
+            devo_is_not_running
+        fi
+
+    # Proxy the "dusk:fails" command to the "php artisan dusk:fails" Artisan command...
+    elif [ "$1" == "dusk:fails" ]; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                -u "$(id -u):$(id -g)" \
+                -e "APP_URL=http://backend" \
+                -e "DUSK_DRIVER_URL=http://selenium:4444/wd/hub" \
+                "backend" \
+                php artisan dusk:fails "$@"
+        else
+            devo_is_not_running
+        fi
+
+    # Initiate a Laravel Tinker session within the application container...
+    elif [ "$1" == "tinker" ] ; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                -u "$(id -u):$(id -g)" \
+                "backend" \
+                php artisan tinker
+        else
+            devo_is_not_running
+        fi
+
+    # Initiate a Bash shell within the application container...
+    elif [ "$1" == "shell" ] || [ "$1" == "bash" ]; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                -u "$(id -u):$(id -g)" \
+                "backend" \
+                bash "$@"
+        else
+            devo_is_not_running
+        fi
+
+    # Initiate a root user Bash shell within the application container...
+    elif [ "$1" == "root-shell" ] ; then
+        shift 1
+
+        if [ "$EXEC" == "yes" ]; then
+            docker-compose exec \
+                "backend" \
+                bash "$@"
+        else
+            devo_is_not_running
+        fi
+
+    # Pass unknown commands to the "docker-compose" binary...
+    else
+        docker-compose "$@"
+    fi
+else
+    docker-compose ps
+fi
